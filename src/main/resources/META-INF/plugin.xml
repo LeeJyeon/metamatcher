@@ -28,7 +28,7 @@
 
   <actions>
     <action id="CheckMetaField" class="com.kakaobankcard.CheckMetaField"
-            text="😀CheckMetaField" description="Check to feild using Meta System">
+            text="😀CheckMetaField" description="Check to field using Meta System">
       <add-to-group group-id="ToolsMenu" anchor="last"/>
     </action>
   </actions>
