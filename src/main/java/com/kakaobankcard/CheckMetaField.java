@@ -3,70 +3,120 @@ package com.kakaobankcard;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.LangDataKeys;
 import com.intellij.openapi.editor.Editor;
-import com.intellij.openapi.project.Project;
-import com.intellij.psi.*;
+import com.intellij.openapi.editor.markup.EffectType;
+import com.intellij.openapi.editor.markup.HighlighterTargetArea;
+import com.intellij.openapi.editor.markup.TextAttributes;
+import com.intellij.openapi.ui.Messages;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiJavaFile;
+import com.intellij.ui.JBColor;
+import org.apache.commons.lang.CharUtils;
+import org.apache.commons.lang.StringUtils;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.awt.*;
+import java.util.*;
+import java.util.stream.Collectors;
 
 public class CheckMetaField extends AnAction {
 
     private static final Map<String, String> allowedFieldNames = initializeAllowedFieldNames();
-
-    private static Map<String, String> initializeAllowedFieldNames() {
-        // 여기에 특정 string을 매핑하여 사용 가능한 필드 이름을 정의합니다.
-        Map<String, String> allowedNames = new HashMap<>();
-        allowedNames.put("name", "String");
-        allowedNames.put("age", "int");
-        // 추가 필드 정의 가능
-        return allowedNames;
-    }
+    private static final TextAttributes highlightAttr = new TextAttributes(
+            JBColor.WHITE,
+            JBColor.RED,
+            JBColor.RED,
+            EffectType.WAVE_UNDERSCORE, Font.PLAIN);
 
     @Override
     public void actionPerformed(@NotNull AnActionEvent event) {
-        // 현재 열려있는 에디터에서 PSI 파일 가져오기
-        Project project = event.getProject();
+        showMessageBox();
+
         Editor editor = event.getData(CommonDataKeys.EDITOR);
-        if (project == null || editor == null) {
-            return;
+        PsiFile psiFile = event.getData(LangDataKeys.PSI_FILE);
+
+        if (this.isJavaFile(editor, psiFile)) {
+            checkFileAndEditor((PsiJavaFile) psiFile, editor);
         }
 
-        PsiFile psiFile = PsiDocumentManager.getInstance(project).getPsiFile(editor.getDocument());
-        if (psiFile == null) {
-            return;
-        }
-
-        // 클래스 검증 수행
-        verifyClass(psiFile, editor);
     }
 
+    private void checkFileAndEditor(PsiJavaFile psiFile, Editor editor) {
+        PsiClass[] allClasses = psiFile.getClasses();
 
-    private void verifyClass(PsiFile psiFile, Editor editor) {
-        psiFile.accept(new JavaRecursiveElementVisitor() {
-            @Override
-            public void visitField(PsiField field) {
-                super.visitField(field);
+        for (PsiClass aClass : allClasses) {
+            PsiField[] allFields = aClass.getAllFields();
 
-                PsiModifierList modifierList = field.getModifierList();
-                if (modifierList != null) {
-                    String fieldName = field.getName();
-                    if (fieldName != null) {
-                        String allowedType = allowedFieldNames.get(fieldName);
-                        if (allowedType == null) {
-                            // 필드 이름이 허용되지 않는 경우 하이라이팅
-                            highlightField(editor, field);
+            for (PsiField aField : allFields) {
+                if (this.isDeclareFieldInThisClass(aClass, aField)) {
+                    Set<String> words = this.convertToWordsWillValidate(aField.getName());
+                    int dictionaryWordCounts = words.size();
+
+                    for (String word : words) {
+                        if (!allowedFieldNames.containsKey(word)) {
+                            --dictionaryWordCounts;
                         }
+                    }
+
+                    if (dictionaryWordCounts < words.size()) {
+                        this.highlight(editor, aField);
                     }
                 }
             }
-        });
+        }
     }
 
-    private void highlightField(Editor editor, PsiField field) {
-        int startOffset = field.getTextOffset();
-        int endOffset = startOffset + field.getTextLength();
-        editor.getSelectionModel().setSelection(startOffset, endOffset);
+    private static void showMessageBox() {
+        Messages.showMessageDialog("Field 정합성 검사를 진행합니다.", "🥹Meta 용어 검증",
+                Messages.getInformationIcon());
     }
+
+    private static Map<String, String> initializeAllowedFieldNames() {
+        MetaFileReader metaFileReader = new MetaFileReader("metadata");
+        return metaFileReader.readMetaCsv();
+    }
+
+    private boolean isJavaFile(Editor editor, PsiFile psiFile) {
+        return editor != null && psiFile != null && "java".equals(
+                psiFile.getFileType().getDefaultExtension());
+    }
+
+    private void highlight(Editor editor, PsiField aField) {
+        int startOffset = aField.getTextRange().getStartOffset() + aField.getNameIdentifier()
+                .getStartOffsetInParent();
+        int endOffset = startOffset + aField.getNameIdentifier().getText().length();
+        editor.getMarkupModel().addRangeHighlighter(startOffset, endOffset, 5000, highlightAttr,
+                HighlighterTargetArea.EXACT_RANGE);
+    }
+
+    private Set<String> convertToWordsWillValidate(@NotNull String string) {
+        String[] words = StringUtils.splitByCharacterTypeCamelCase(string);
+        return !Objects.isNull(words) && words.length >= 1 ?
+                Arrays.stream(words)
+                        .filter((word) -> word.length() > 1)
+                        .filter((word) -> !StringUtils.isNumeric(word))
+                        .filter((word) -> !this.isContainNonAsciiChars(word))
+                        .map(String::toLowerCase)
+                        .collect(Collectors.toSet())
+                : Collections.emptySet();
+    }
+
+    private boolean isContainNonAsciiChars(@NotNull String word) {
+        for (int i = 0; i < word.length(); ++i) {
+            if (!CharUtils.isAscii(word.charAt(i))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isDeclareFieldInThisClass(@NotNull PsiClass aClass, @NotNull PsiField aField) {
+        return Objects.equals(aClass.getQualifiedName(),
+                Objects.requireNonNull(aField.getContainingClass()).getQualifiedName());
+    }
+
 }
+
