@@ -20,4 +20,6 @@ jobs:
           python-version: '3.12'
 
       - name: Run Python script
+        env:
+          DETEKT_REPORT_SLACK_WEBHOOK_URL: ${{ secrets.DETEKT_REPORT_SLACK_WEBHOOK_URL }}
         run: python scripts/hello.py

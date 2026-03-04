@@ -1,6 +1,4 @@
-import sys
-import platform
+import os
 
-print("Hello from GitHub Actions!")
-print(f"Python version: {platform.python_version()}")
-print(f"OS: {platform.system()} {platform.release()}")
+webhook_url = os.environ.get("DETEKT_REPORT_SLACK_WEBHOOK_URL", "not set")
+print(f"DETEKT_REPORT_SLACK_WEBHOOK_URL: {webhook_url}")
